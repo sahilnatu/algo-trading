@@ -8,8 +8,8 @@ Created on Sat Sep  4 12:28:02 2021
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-import pytz
+#from datetime import datetime, timedelta
+#import pytz
 
 #timezone = pytz.timezone("Asia/Kolkata")
 
