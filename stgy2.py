@@ -13,14 +13,13 @@ import numpy as np
 
 #timezone = pytz.timezone("Asia/Kolkata")
 
-stocks = ["SBIN.NS"]#,"RELIANCE.NS","INFY.NS","MINDTREE.NS","SBIN.NS"]
+stocks = ["RELIANCE.NS"]#,"RELIANCE.NS","INFY.NS","MINDTREE.NS","SBIN.NS"]
 stock = stocks[0]
 portfolio_log = pd.DataFrame(columns=["Stock","Activity","Qty","Value","Total"])
 portfolio = pd.DataFrame(columns=["Stock","Qty","Value","Total"])
-share_size = 1
-stop_loss = 0.97
-profit_booking = 1.1
-time_period = "7d"
+share_size = 100
+stop_loss = 0.995
+profit_booking = 1.05
 #start_time = 
 
 #while datetime.now() < end_time:
@@ -29,30 +28,50 @@ time_period = "7d"
 
 # Read ticker and extract data at 1m interval for last 40d
 tick = yf.Ticker(stock)
-hist_tick = tick.history(period=time_period,interval="30m",)
+hist_tick = tick.history(period="7d",interval="1m",)
 
 
 # Create a new dataframe for strategy 1 (refer appendix for more details on this strategy)
-strategy_1_df = pd.DataFrame()
-strategy_1_df["timestamp"] = hist_tick.index
-strategy_1_df.set_index("timestamp",inplace=True)
-strategy_1_df["open"] = hist_tick["Open"]
-strategy_1_df["high"] = hist_tick["High"]
-strategy_1_df["low"] = hist_tick["Low"]
-strategy_1_df["close"] = hist_tick["Close"]
+strategy_2_df = pd.DataFrame()
+strategy_2_df["timestamp"] = hist_tick.index
+strategy_2_df.set_index("timestamp",inplace=True)
+strategy_2_df["open"] = hist_tick["Open"]
+strategy_2_df["high"] = hist_tick["High"]
+strategy_2_df["low"] = hist_tick["Low"]
+strategy_2_df["close"] = hist_tick["Close"]
 
-# Calculating 5-SMA and 7-SMA at 1m interval
-sma_5 = hist_tick["Close"].rolling(5,min_periods=1).mean()
-strategy_1_df["sma_5"] = sma_5
-sma_7 = hist_tick["Close"].rolling(7,min_periods=1).mean()
-strategy_1_df["sma_7"] = sma_7
 
 # Create an empty column for call at every row
-strategy_1_df["call"] = np.nan
-strategy_1_df["trigger"] = np.nan
+strategy_2_df["call"] = np.nan
+strategy_2_df["trigger"] = np.nan
+
+strategy_2_df["rising_sar"] = np.nan
+strategy_2_df["falling_sar"] = np.nan
+strategy_2_df["psar"] = np.nan
+
+rising_sar_init = min(strategy_2_df["close"].iloc[0],strategy_2_df["close"].iloc[1])
+falling_sar_init = max(strategy_2_df["close"].iloc[0],strategy_2_df["close"].iloc[1])
+acc_init = 0.03
+acc_max = 0.3
+acc_step = 0.03
+
+for i in range(len(strategy_2_df)):
+    strategy_2_df_subset = strategy_2_df.iloc[:i+1]
+    strategy_2_df_subset.agg(
+        up_ep = pd.NamedAgg(column="close", aggfunc="max"),
+        dn_ep = pd.NamedAgg(column="close", aggfunc="min")
+        )
+    if i==0:
+        strategy_2_df["rising_sar"].iloc[i] = rising_sar_init + acc_init*(falling_sar_init - rising_sar_init)
+        strategy_2_df["falling_sar"].iloc[i] = rising_sar_init - acc_init*(rising_sar_init - falling_sar_init)
+    if i==1:
+        acc = acc_init+acc_step
+        strategy_2_df["rising_sar"].iloc[i] = strategy_2_df["rising_sar"].iloc[i-1] + acc*(falling_sar_init - strategy_2_df["rising_sar"].iloc[i-1])
+        strategy_2_df["falling_sar"].iloc[i] = strategy_2_df["falling_sar"].iloc[i-1] - acc(strategy_2_df["falling_sar"].iloc[i-1] - rising_sar_init)
+    
 
 # Remove first 7 entries as 7-SMA would be incorrectly calculated there
-strategy_1_df_trunc = strategy_1_df.iloc[7:,:]
+strategy_1_df_trunc = strategy_2_df.iloc[7:,:]
 
 for i in range(len(strategy_1_df_trunc)):
     if i==0:
@@ -134,7 +153,7 @@ for i in range(len(strategy_1_df_trunc)):
 if len(portfolio)!=0:
     if portfolio.iloc[0,1]>0:
         print("need to sell")
-        row = pd.DataFrame([[stock,"SELL",portfolio.iloc[0,1],strategy_1_df_trunc["close"].iloc[-1],portfolio.iloc[0,1]*strategy_1_df_trunc["close"].iloc[-1]]], columns=["Stock","Activity","Qty","Value","Total"])
+        row = pd.DataFrame([[stock,"SELL",-portfolio.iloc[0,1],strategy_1_df_trunc["close"].iloc[-1],-portfolio.iloc[0,1]*strategy_1_df_trunc["close"].iloc[-1]]], columns=["Stock","Activity","Qty","Value","Total"])
         portfolio_log = portfolio_log.append(row)
         row1 = pd.DataFrame([[stock,-portfolio.iloc[0,1],strategy_1_df_trunc["close"].iloc[-1],-portfolio.iloc[0,1]*strategy_1_df_trunc["close"].iloc[-1]]], columns=["Stock","Qty","Value","Total"])
         portfolio = portfolio.append(row1)
@@ -146,7 +165,7 @@ if len(portfolio)!=0:
         portfolio.reset_index(inplace=True)
     elif portfolio.iloc[0,1]<0:
         print("need to buy")
-        row = pd.DataFrame([[stock,"BUY",portfolio.iloc[0,1],strategy_1_df_trunc["close"].iloc[-1],portfolio.iloc[0,1]*strategy_1_df_trunc["close"].iloc[-1]]], columns=["Stock","Activity","Qty","Value","Total"])
+        row = pd.DataFrame([[stock,"BUY",-portfolio.iloc[0,1],strategy_1_df_trunc["close"].iloc[-1],-portfolio.iloc[0,1]*strategy_1_df_trunc["close"].iloc[-1]]], columns=["Stock","Activity","Qty","Value","Total"])
         portfolio_log = portfolio_log.append(row)
         row1 = pd.DataFrame([[stock,-portfolio.iloc[0,1],strategy_1_df_trunc["close"].iloc[-1],-portfolio.iloc[0,1]*strategy_1_df_trunc["close"].iloc[-1]]], columns=["Stock","Qty","Value","Total"])
         portfolio = portfolio.append(row1)
@@ -172,7 +191,6 @@ print("Total Shares Bought: {0}".format(net_buy))
 print("Total Shares Sold: {0}".format(net_sell))
 print("Avg Buy Price: INR {val:.2f}".format(val=avg_buy))
 print("Avg Sell Price: INR {val:.2f}".format(val=avg_sell))
-print("Profit / Loss: {val:.4f}% in span of {x}".format(val=(avg_sell-avg_buy)/avg_buy,x=time_period))
 
     # colors for the line plot
     #colors = ['blue', 'green', 'orange', 'red']
