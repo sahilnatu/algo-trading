@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Sat Sep  4 12:28:02 2021
+Created on Sun Sep  5 21:09:22 2021
 
 @author: sahil
 """
@@ -8,10 +8,12 @@ Created on Sat Sep  4 12:28:02 2021
 import yfinance as yf
 import pandas as pd
 import numpy as np
-#from datetime import datetime, timedelta
-#import pytz
 
-#timezone = pytz.timezone("Asia/Kolkata")
+def calculate_ema(prices, interval, smoothing):
+    ema = [sum(prices[:interval]) / interval]
+    for price in prices[interval:]:
+        ema.append((price * (smoothing / (1 + interval))) + ema[-1] * (1 - (smoothing / (1 + interval))))
+    return ema
 
 stocks = ["RELIANCE.NS"]#,"RELIANCE.NS","INFY.NS","MINDTREE.NS","SBIN.NS"]
 stock = stocks[0]
@@ -21,6 +23,7 @@ share_size = 1
 stop_loss = 0.97
 profit_booking = 1.1
 time_period = "7d"
+smoothing = 2
 #start_time = 
 
 #while datetime.now() < end_time:
@@ -41,18 +44,18 @@ strategy_1_df["high"] = hist_tick["High"]
 strategy_1_df["low"] = hist_tick["Low"]
 strategy_1_df["close"] = hist_tick["Close"]
 
-# Calculating 5-SMA and 7-SMA at 1m interval
-sma_5 = hist_tick["Close"].rolling(5,min_periods=1).mean()
-strategy_1_df["sma_5"] = sma_5
-sma_7 = hist_tick["Close"].rolling(7,min_periods=1).mean()
-strategy_1_df["sma_7"] = sma_7
-
-# Create an empty column for call at every row
-strategy_1_df["call"] = np.nan
-strategy_1_df["trigger"] = np.nan
-
 # Remove first 7 entries as 7-SMA would be incorrectly calculated there
 strategy_1_df_trunc = strategy_1_df.iloc[7:,:]
+
+# Calculating 5-EMA and 7-EMA
+ema_5 = calculate_ema(hist_tick["Close"], 5, smoothing)
+strategy_1_df_trunc["ema_5"] = ema_5[len(ema_5) - len(strategy_1_df_trunc):]
+ema_7 = calculate_ema(hist_tick["Close"], 7, smoothing)
+strategy_1_df_trunc["ema_7"] = ema_7[len(ema_7) - len(strategy_1_df_trunc):]
+
+# Create an empty column for call at every row
+strategy_1_df_trunc["call"] = np.nan
+strategy_1_df_trunc["trigger"] = np.nan
 
 for i in range(len(strategy_1_df_trunc)):
     if i==0:
@@ -78,7 +81,7 @@ for i in range(len(strategy_1_df_trunc)):
         
         if buy_trigger:
             strategy_1_df_trunc["call"].iloc[i] = "BUY"
-            strategy_1_df_trunc["trigger"].iloc[i] = "SMA 5/7"
+            strategy_1_df_trunc["trigger"].iloc[i] = "EMA 5/7"
             row = pd.DataFrame([[stock,strategy_1_df_trunc["call"].iloc[i],share_size,strategy_1_df_trunc["close"].iloc[i],share_size*strategy_1_df_trunc["close"].iloc[i]]], columns=["Stock","Activity","Qty","Value","Total"])
             portfolio_log = portfolio_log.append(row)
             row1 = pd.DataFrame([[stock,share_size,strategy_1_df_trunc["close"].iloc[i],share_size*strategy_1_df_trunc["close"].iloc[i]]], columns=["Stock","Qty","Value","Total"])
@@ -91,7 +94,7 @@ for i in range(len(strategy_1_df_trunc)):
             portfolio.reset_index(inplace=True)
         elif sell_trigger_1:
             strategy_1_df_trunc["call"].iloc[i] = "SELL"
-            strategy_1_df_trunc["trigger"].iloc[i] = "SMA 5/7"
+            strategy_1_df_trunc["trigger"].iloc[i] = "EMA 5/7"
             row = pd.DataFrame([[stock,strategy_1_df_trunc["call"].iloc[i],share_size,strategy_1_df_trunc["close"].iloc[i],share_size*strategy_1_df_trunc["close"].iloc[i]]], columns=["Stock","Activity","Qty","Value","Total"])
             portfolio_log = portfolio_log.append(row)
             row1 = pd.DataFrame([[stock,-share_size,strategy_1_df_trunc["close"].iloc[i],-share_size*strategy_1_df_trunc["close"].iloc[i]]], columns=["Stock","Qty","Value","Total"])

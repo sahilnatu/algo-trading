@@ -8,6 +8,7 @@ Created on Sat Sep  4 12:28:02 2021
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 #from datetime import datetime, timedelta
 #import pytz
 
@@ -48,152 +49,96 @@ strategy_2_df["trigger"] = np.nan
 strategy_2_df["rising_sar"] = np.nan
 strategy_2_df["falling_sar"] = np.nan
 strategy_2_df["psar"] = np.nan
+strategy_2_df["up_ep"] = np.nan
+strategy_2_df["dn_ep"] = np.nan
+strategy_2_df["up_acc"] = np.nan
+strategy_2_df["dn_acc"] = np.nan
+strategy_2_df["trend"] = np.nan
 
 rising_sar_init = min(strategy_2_df["close"].iloc[0],strategy_2_df["close"].iloc[1])
 falling_sar_init = max(strategy_2_df["close"].iloc[0],strategy_2_df["close"].iloc[1])
 acc_init = 0.03
 acc_max = 0.3
 acc_step = 0.03
+up_acc_reset = False
+dn_acc_reset = False
+up_acc = acc_init + acc_step
+dn_acc = acc_init + acc_step
+low_lim = 0
+
+strategy_2_df = strategy_2_df.iloc[:100]
 
 for i in range(len(strategy_2_df)):
-    strategy_2_df_subset = strategy_2_df.iloc[:i+1]
-    strategy_2_df_subset.agg(
-        up_ep = pd.NamedAgg(column="close", aggfunc="max"),
-        dn_ep = pd.NamedAgg(column="close", aggfunc="min")
-        )
+    if i<2:
+        strategy_2_df_subset = strategy_2_df.iloc[0:2]
+        strategy_2_df_agg = strategy_2_df_subset.agg(
+            up_ep = pd.NamedAgg(column="close", aggfunc="max"),
+            dn_ep = pd.NamedAgg(column="close", aggfunc="min")
+            )
+        strategy_2_df["up_ep"].iloc[i] = strategy_2_df_agg.iloc[0]
+        strategy_2_df["dn_ep"].iloc[i] = strategy_2_df_agg.iloc[1]
+    else:
+        strategy_2_df_subset = strategy_2_df.iloc[low_lim:i+1]
+        strategy_2_df_agg = strategy_2_df_subset.agg(
+            up_ep = pd.NamedAgg(column="close", aggfunc="max"),
+            dn_ep = pd.NamedAgg(column="close", aggfunc="min")
+            )
+        strategy_2_df["up_ep"].iloc[i] = strategy_2_df_agg.iloc[0]
+        strategy_2_df["dn_ep"].iloc[i] = strategy_2_df_agg.iloc[1]
     if i==0:
         strategy_2_df["rising_sar"].iloc[i] = rising_sar_init + acc_init*(falling_sar_init - rising_sar_init)
         strategy_2_df["falling_sar"].iloc[i] = rising_sar_init - acc_init*(rising_sar_init - falling_sar_init)
     if i==1:
-        acc = acc_init+acc_step
+        acc = acc_init + acc_step
         strategy_2_df["rising_sar"].iloc[i] = strategy_2_df["rising_sar"].iloc[i-1] + acc*(falling_sar_init - strategy_2_df["rising_sar"].iloc[i-1])
-        strategy_2_df["falling_sar"].iloc[i] = strategy_2_df["falling_sar"].iloc[i-1] - acc(strategy_2_df["falling_sar"].iloc[i-1] - rising_sar_init)
-    
-
-# Remove first 7 entries as 7-SMA would be incorrectly calculated there
-strategy_1_df_trunc = strategy_2_df.iloc[7:,:]
-
-for i in range(len(strategy_1_df_trunc)):
-    if i==0:
-        strategy_1_df_trunc["call"].iloc[i] = "HOLD"
-        continue
+        strategy_2_df["falling_sar"].iloc[i] = strategy_2_df["falling_sar"].iloc[i-1] - acc*(strategy_2_df["falling_sar"].iloc[i-1] - rising_sar_init)
+    if up_acc_reset == True:
+        up_acc = acc_init
     else:
-        buy_trigger = (strategy_1_df_trunc.iloc[i-1,4] <= strategy_1_df_trunc.iloc[i-1,5]) and (strategy_1_df_trunc.iloc[i,4] > strategy_1_df_trunc.iloc[i,5])
-        sell_trigger_1 = (strategy_1_df_trunc.iloc[i-1,4] >= strategy_1_df_trunc.iloc[i-1,5]) and (strategy_1_df_trunc.iloc[i,4] < strategy_1_df_trunc.iloc[i,5])
-        if len(portfolio) > 0:
-            last_close = strategy_1_df_trunc.iloc[i,3]
-            avg_portfolio_price = portfolio["Value"].values
-            sell_trigger_2 = (last_close <= avg_portfolio_price*stop_loss)
-            sell_trigger_3 = (last_close >= avg_portfolio_price*profit_booking)
-            if sell_trigger_2==True:
-                print("2 is true")
-            if sell_trigger_3==True:
-                print("3 is true")
+        if up_acc < acc_max:
+            up_acc = up_acc + acc_step
+    if dn_acc_reset == True:
+        dn_acc = acc_init
+    else:
+        if dn_acc < acc_max:
+            dn_acc = dn_acc + acc_step
+    if i>1:
+        strategy_2_df["rising_sar"].iloc[i] = strategy_2_df["rising_sar"].iloc[i-1] + up_acc*(strategy_2_df["up_ep"].iloc[i] - strategy_2_df["rising_sar"].iloc[i-1])
+        strategy_2_df["falling_sar"].iloc[i] = strategy_2_df["falling_sar"].iloc[i-1] - dn_acc*(strategy_2_df["falling_sar"].iloc[i-1] - strategy_2_df["dn_ep"].iloc[i])
+        curr_close = strategy_2_df["close"].iloc[i]
+        curr_rising_sar = strategy_2_df["rising_sar"].iloc[i]
+        curr_falling_sar = strategy_2_df["falling_sar"].iloc[i]
+        last_close = strategy_2_df["close"].iloc[i-1]
+        last_rising_sar = strategy_2_df["rising_sar"].iloc[i-1]
+        last_falling_sar = strategy_2_df["falling_sar"].iloc[i-1]
+        if curr_close >= curr_falling_sar and last_close < last_falling_sar:
+            strategy_2_df["trend"].iloc[i] = "up_start"
+            up_acc_reset = True
+            dn_acc_reset = True
+            low_lim = i+1
+            strategy_2_df["psar"].iloc[i] = strategy_2_df["rising_sar"].iloc[i]
+        elif curr_close <= curr_rising_sar and last_close > last_rising_sar:
+            strategy_2_df["trend"].iloc[i] = "dn_start"
+            up_acc_reset = True
+            dn_acc_reset = True
+            low_lim = i+1
+            strategy_2_df["psar"].iloc[i] = strategy_2_df["falling_sar"].iloc[i]
+        elif (curr_close < curr_falling_sar and last_close < last_falling_sar) or strategy_2_df["trend"].iloc[i-1] == "dn_start":
+            strategy_2_df["trend"].iloc[i] = "dn"
+            up_acc_reset = False
+            dn_acc_reset = False
+            strategy_2_df["psar"].iloc[i] = strategy_2_df["falling_sar"].iloc[i]
+        elif (curr_close > curr_rising_sar and last_close > last_rising_sar) or strategy_2_df["trend"].iloc[i-1] == "up_start":
+            strategy_2_df["trend"].iloc[i] = "up"
+            up_acc_reset = False
+            dn_acc_reset = False
+            strategy_2_df["psar"].iloc[i] = strategy_2_df["rising_sar"].iloc[i]
         else:
-            sell_trigger_2 = False
-            sell_trigger_3 = False
-            
-        sell_trigger = sell_trigger_1 or sell_trigger_2 or sell_trigger_3
+            up_acc_reset = False
+            dn_acc_reset = False
+        strategy_2_df["up_acc"].iloc[i] = up_acc
+        strategy_2_df["dn_acc"].iloc[i] = dn_acc
         
-        if buy_trigger:
-            strategy_1_df_trunc["call"].iloc[i] = "BUY"
-            strategy_1_df_trunc["trigger"].iloc[i] = "SMA 5/7"
-            row = pd.DataFrame([[stock,strategy_1_df_trunc["call"].iloc[i],share_size,strategy_1_df_trunc["close"].iloc[i],share_size*strategy_1_df_trunc["close"].iloc[i]]], columns=["Stock","Activity","Qty","Value","Total"])
-            portfolio_log = portfolio_log.append(row)
-            row1 = pd.DataFrame([[stock,share_size,strategy_1_df_trunc["close"].iloc[i],share_size*strategy_1_df_trunc["close"].iloc[i]]], columns=["Stock","Qty","Value","Total"])
-            portfolio = portfolio.append(row1)
-            portfolio = portfolio.groupby("Stock").agg(
-                                Qty = pd.NamedAgg(column="Qty", aggfunc="sum"),
-                                Value = pd.NamedAgg(column="Value", aggfunc="mean"),
-                                Total = pd.NamedAgg(column="Total", aggfunc="sum")
-                                )
-            portfolio.reset_index(inplace=True)
-        elif sell_trigger_1:
-            strategy_1_df_trunc["call"].iloc[i] = "SELL"
-            strategy_1_df_trunc["trigger"].iloc[i] = "SMA 5/7"
-            row = pd.DataFrame([[stock,strategy_1_df_trunc["call"].iloc[i],share_size,strategy_1_df_trunc["close"].iloc[i],share_size*strategy_1_df_trunc["close"].iloc[i]]], columns=["Stock","Activity","Qty","Value","Total"])
-            portfolio_log = portfolio_log.append(row)
-            row1 = pd.DataFrame([[stock,-share_size,strategy_1_df_trunc["close"].iloc[i],-share_size*strategy_1_df_trunc["close"].iloc[i]]], columns=["Stock","Qty","Value","Total"])
-            portfolio = portfolio.append(row1)
-            portfolio = portfolio.groupby("Stock").agg(
-                                Qty = pd.NamedAgg(column="Qty", aggfunc="sum"),
-                                Value = pd.NamedAgg(column="Value", aggfunc="mean"),
-                                Total = pd.NamedAgg(column="Total", aggfunc="sum")
-                                )
-            portfolio.reset_index(inplace=True)
-        elif sell_trigger_2:
-            strategy_1_df_trunc["call"].iloc[i] = "SELL"
-            strategy_1_df_trunc["trigger"].iloc[i] = "STOP LOSS"
-            row = pd.DataFrame([[stock,strategy_1_df_trunc["call"].iloc[i],share_size,strategy_1_df_trunc["close"].iloc[i],share_size*strategy_1_df_trunc["close"].iloc[i]]], columns=["Stock","Activity","Qty","Value","Total"])
-            portfolio_log = portfolio_log.append(row)
-            row1 = pd.DataFrame([[stock,-share_size,strategy_1_df_trunc["close"].iloc[i],-share_size*strategy_1_df_trunc["close"].iloc[i]]], columns=["Stock","Qty","Value","Total"])
-            portfolio = portfolio.append(row1)
-            portfolio = portfolio.groupby("Stock").agg(
-                                Qty = pd.NamedAgg(column="Qty", aggfunc="sum"),
-                                Value = pd.NamedAgg(column="Value", aggfunc="mean"),
-                                Total = pd.NamedAgg(column="Total", aggfunc="sum")
-                                )
-            portfolio.reset_index(inplace=True)
-        elif sell_trigger_3:
-            strategy_1_df_trunc["call"].iloc[i] = "SELL"
-            strategy_1_df_trunc["trigger"].iloc[i] = "PROFIT BOOK"
-            row = pd.DataFrame([[stock,strategy_1_df_trunc["call"].iloc[i],share_size,strategy_1_df_trunc["close"].iloc[i],share_size*strategy_1_df_trunc["close"].iloc[i]]], columns=["Stock","Activity","Qty","Value","Total"])
-            portfolio_log = portfolio_log.append(row)
-            row1 = pd.DataFrame([[stock,-share_size,strategy_1_df_trunc["close"].iloc[i],-share_size*strategy_1_df_trunc["close"].iloc[i]]], columns=["Stock","Qty","Value","Total"])
-            portfolio = portfolio.append(row1)
-            portfolio = portfolio.groupby("Stock").agg(
-                                Qty = pd.NamedAgg(column="Qty", aggfunc="sum"),
-                                Value = pd.NamedAgg(column="Value", aggfunc="mean"),
-                                Total = pd.NamedAgg(column="Total", aggfunc="sum")
-                                )
-            portfolio.reset_index(inplace=True)
-        else:
-           strategy_1_df_trunc["call"].iloc[i] = "HOLD"
-
-if len(portfolio)!=0:
-    if portfolio.iloc[0,1]>0:
-        print("need to sell")
-        row = pd.DataFrame([[stock,"SELL",-portfolio.iloc[0,1],strategy_1_df_trunc["close"].iloc[-1],-portfolio.iloc[0,1]*strategy_1_df_trunc["close"].iloc[-1]]], columns=["Stock","Activity","Qty","Value","Total"])
-        portfolio_log = portfolio_log.append(row)
-        row1 = pd.DataFrame([[stock,-portfolio.iloc[0,1],strategy_1_df_trunc["close"].iloc[-1],-portfolio.iloc[0,1]*strategy_1_df_trunc["close"].iloc[-1]]], columns=["Stock","Qty","Value","Total"])
-        portfolio = portfolio.append(row1)
-        portfolio = portfolio.groupby("Stock").agg(
-            Qty = pd.NamedAgg(column="Qty", aggfunc="sum"),
-            Value = pd.NamedAgg(column="Value", aggfunc="mean"),
-            Total = pd.NamedAgg(column="Total", aggfunc="sum")
-            )
-        portfolio.reset_index(inplace=True)
-    elif portfolio.iloc[0,1]<0:
-        print("need to buy")
-        row = pd.DataFrame([[stock,"BUY",-portfolio.iloc[0,1],strategy_1_df_trunc["close"].iloc[-1],-portfolio.iloc[0,1]*strategy_1_df_trunc["close"].iloc[-1]]], columns=["Stock","Activity","Qty","Value","Total"])
-        portfolio_log = portfolio_log.append(row)
-        row1 = pd.DataFrame([[stock,-portfolio.iloc[0,1],strategy_1_df_trunc["close"].iloc[-1],-portfolio.iloc[0,1]*strategy_1_df_trunc["close"].iloc[-1]]], columns=["Stock","Qty","Value","Total"])
-        portfolio = portfolio.append(row1)
-        portfolio = portfolio.groupby("Stock").agg(
-            Qty = pd.NamedAgg(column="Qty", aggfunc="sum"),
-            Value = pd.NamedAgg(column="Value", aggfunc="mean"),
-            Total = pd.NamedAgg(column="Total", aggfunc="sum")
-            )
-        portfolio.reset_index(inplace=True)
-returns = portfolio_log.groupby(["Stock","Activity"]).agg(
-    Qty = pd.NamedAgg(column="Qty", aggfunc="sum"),
-    Value = pd.NamedAgg(column="Value", aggfunc="mean"),
-    Total = pd.NamedAgg(column="Total", aggfunc="sum")
-    )
-returns.reset_index(inplace=True)
-net_pl = returns[returns["Activity"]=="SELL"]["Total"].values[0] - returns[returns["Activity"]=="BUY"]["Total"].values[0]
-net_buy = returns[returns["Activity"]=="BUY"]["Qty"].values[0]
-net_sell = returns[returns["Activity"]=="SELL"]["Qty"].values[0]
-avg_buy = returns[returns["Activity"]=="BUY"]["Value"].values[0]
-avg_sell = returns[returns["Activity"]=="SELL"]["Value"].values[0]
-print("Net Profit / Loss is: INR {val:.2f}".format(val=net_pl))
-print("Total Shares Bought: {0}".format(net_buy))
-print("Total Shares Sold: {0}".format(net_sell))
-print("Avg Buy Price: INR {val:.2f}".format(val=avg_buy))
-print("Avg Sell Price: INR {val:.2f}".format(val=avg_sell))
-
-    # colors for the line plot
-    #colors = ['blue', 'green', 'orange', 'red']
-    
-    # line plot - simple moving avg
-    #plt = avgs.iloc[-30:,:].plot(kind='line',color=colors, linewidth=3, figsize=(12,6),title='Simple Moving Averages for RIL',xlabel='Date',ylabel='Share Price in INR')
+plt.plot(strategy_2_df["psar"], linestyle = ':')
+plt.plot(strategy_2_df["close"], linestyle = '-')
+plt.show()
